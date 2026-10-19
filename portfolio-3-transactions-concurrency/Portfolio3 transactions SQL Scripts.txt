@@ -1,0 +1,47 @@
+-- ==========================================
+-- PORTFOLIO 3: Transactions & Concurrency
+-- Greenfield Community Library
+-- ==========================================
+
+-- 1. SUCCESSFUL TRANSACTION: Borrowing a book
+-- Let's borrow Copy ID 4 (Designing Data-Intensive Applications) for Member 4 (Mary Smith)
+BEGIN;
+-- Lock the copy to prevent others from borrowing it at the same time
+SELECT * FROM book_copies WHERE copy_id = 4 AND status = 'available' FOR UPDATE;
+
+-- Insert the loan
+INSERT INTO loans (copy_id, member_id, issued_by, due_on, status)
+VALUES (4, 4, 1, CURRENT_DATE + INTERVAL '14 days', 'active');
+
+-- Mark the copy as borrowed
+UPDATE book_copies SET status = 'borrowed' WHERE copy_id = 4;
+COMMIT;
+
+
+-- 2. TRANSACTION WITH ROLLBACK: Attempting an invalid loan
+-- Let's try to borrow Copy ID 99, which doesn't exist. We will roll back to prevent corruption.
+BEGIN;
+UPDATE book_copies SET status = 'borrowed' WHERE copy_id = 99;
+-- Oops, no rows were updated. Let's abort the transaction.
+ROLLBACK;
+
+
+-- 3. RETURNING A BOOK & ISSUING A FINE
+-- Let's return Loan ID 2 (which we know is 6 days overdue)
+BEGIN;
+-- Update the loan to mark it returned
+UPDATE loans
+SET returned_on = CURRENT_TIMESTAMP, status = 'returned'
+WHERE loan_id = 2;
+
+-- Calculate the fine (6 days overdue * 50 per day = 300)
+INSERT INTO fines (loan_id, member_id, amount, reason, is_paid)
+SELECT loan_id, member_id, (CURRENT_DATE - due_on) * 50, 'overdue', FALSE
+FROM loans
+WHERE loan_id = 2 AND CURRENT_DATE > due_on;
+
+-- Make the book available again
+UPDATE book_copies SET status = 'available'
+WHERE copy_id = (SELECT copy_id FROM loans WHERE loan_id = 2);
+
+COMMIT;
